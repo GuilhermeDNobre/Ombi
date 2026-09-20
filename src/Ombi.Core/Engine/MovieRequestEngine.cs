@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using Ombi.Api.External.ExternalApis.TheMovieDb.Models;
 using Ombi.Core.Authentication;
 using Ombi.Core.Engine.Interfaces;
+using Ombi.Core.Engine.Requests;
 using Ombi.Core.Models.UI;
 using Ombi.Core.Rule.Interfaces;
 using Ombi.Core.Settings;
@@ -34,7 +35,8 @@ namespace Ombi.Core.Engine
             OmbiUserManager manager, IRepository<RequestLog> rl, ICacheService cache,
             ISettingsService<OmbiSettings> ombiSettings, IRepository<RequestSubscription> sub, IMediaCacheService mediaCacheService,
             IFeatureService featureService,
-            IUserPlayedMovieRepository userPlayedMovieRepository)
+            IUserPlayedMovieRepository userPlayedMovieRepository,
+            IMovieRequestQueryBuilder queryBuilder)
             : base(user, requestService, r, manager, cache, ombiSettings, sub)
         {
             MovieApi = movieApi;
@@ -45,6 +47,7 @@ namespace Ombi.Core.Engine
             _mediaCacheService = mediaCacheService;
             _featureService = featureService;
             _userPlayedMovieRepository = userPlayedMovieRepository;
+            _queryBuilder = queryBuilder;
         }
 
         private IMovieDbApi MovieApi { get; }
@@ -55,6 +58,7 @@ namespace Ombi.Core.Engine
         private readonly IMediaCacheService _mediaCacheService;
         private readonly IFeatureService _featureService;
         protected readonly IUserPlayedMovieRepository _userPlayedMovieRepository;
+        private readonly IMovieRequestQueryBuilder _queryBuilder;
 
         /// <summary>
         /// Requests the movie.
@@ -208,40 +212,12 @@ namespace Ombi.Core.Engine
             var shouldHide = await HideFromOtherUsers();
             var allRequests = LoadRequests(shouldHide);
 
-            switch (orderFilter.AvailabilityFilter)
-            {
-                case FilterType.None:
-                    break;
-                case FilterType.Available:
-                    allRequests = allRequests.Where(x => x.Available);
-                    break;
-                case FilterType.NotAvailable:
-                    allRequests = allRequests.Where(x => !x.Available);
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException();
-            }
-
-            switch (orderFilter.StatusFilter)
-            {
-                case FilterType.None:
-                    break;
-                case FilterType.Approved:
-                    allRequests = allRequests.Where(x => x.Approved);
-                    break;
-                case FilterType.Processing:
-                    allRequests = allRequests.Where(x => x.Approved && !x.Available);
-                    break;
-                case FilterType.PendingApproval:
-                    allRequests = allRequests.Where(x => !x.Approved && !x.Available && !(x.Denied ?? false));
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException();
-            }
+            allRequests = _queryBuilder.FilterByAvailability(allRequests, orderFilter.AvailabilityFilter);
+            allRequests = _queryBuilder.FilterByStatus(allRequests, orderFilter.StatusFilter);
 
             var total = allRequests.Count();
 
-            var requests = await (OrderMovies(allRequests, orderFilter.OrderType)).Skip(position).Take(count)
+            var requests = await (_queryBuilder.Order(allRequests, orderFilter.OrderType)).Skip(position).Take(count)
                 .ToListAsync();
 
             await FillAdditionalFields(shouldHide, requests);
@@ -260,7 +236,7 @@ namespace Ombi.Core.Engine
             allRequests = FilterByRequestedUser(allRequests, requestedByUserId, shouldHide.IsAdmin);
 
             var total = await allRequests.CountAsync();
-            var requests = await ApplySortMovies(allRequests, sortProperty, sortOrder)
+            var requests = await _queryBuilder.Sort(allRequests, sortProperty, sortOrder)
                 .Skip(position).Take(count).ToListAsync();
 
             await FillAdditionalFields(shouldHide, requests);
@@ -278,35 +254,7 @@ namespace Ombi.Core.Engine
 
             allRequests = FilterByRequestedUser(allRequests, requestedByUserId, shouldHide.IsAdmin);
 
-            switch (status)
-            {
-                case RequestStatus.PendingApproval:
-                    allRequests = allRequests.Where(x => 
-                            (x.RequestedDate != DateTime.MinValue && !x.Approved && !x.Available && (!x.Denied.HasValue || !x.Denied.Value)) 
-                            || 
-                            (x.Has4KRequest && !x.Approved4K && !x.Available4K && (!x.Denied4K.HasValue || !x.Denied4K.Value))
-                       );
-                    break;
-                case RequestStatus.ProcessingRequest:
-                    allRequests = allRequests.Where(x => 
-                            (x.RequestedDate != DateTime.MinValue && x.Approved && !x.Available && (!x.Denied.HasValue || !x.Denied.Value))
-                            ||
-                            (x.Has4KRequest && x.Approved4K && !x.Available4K && (!x.Denied4K.HasValue || !x.Denied4K.Value))
-                        );
-                    break;
-                case RequestStatus.Available:
-                    allRequests = allRequests.Where(x => x.Available || x.Available4K);
-                    break;
-                case RequestStatus.Denied:
-                    allRequests = allRequests.Where(x => 
-                            (x.Denied.HasValue && x.Denied.Value && !x.Available)
-                            ||
-                            (x.Has4KRequest && x.Denied4K.HasValue && x.Denied4K.Value && !x.Available4K)
-                        );
-                    break;
-                default:
-                    break;
-            }
+            allRequests = _queryBuilder.FilterByRequestStatus(allRequests, status);
 
             var total = await allRequests.CountAsync();
             if (total == 0)
@@ -318,7 +266,7 @@ namespace Ombi.Core.Engine
                 };
             }
 
-            var requests = await ApplySortMovies(allRequests, sortProperty, sortOrder)
+            var requests = await _queryBuilder.Sort(allRequests, sortProperty, sortOrder)
                 .Skip(position).Take(count).ToListAsync();
 
             await FillAdditionalFields(shouldHide, requests);
@@ -337,7 +285,7 @@ namespace Ombi.Core.Engine
             allRequests = FilterByRequestedUser(allRequests, requestedByUserId, shouldHide.IsAdmin);
 
             var total = await allRequests.CountAsync();
-            var requests = await ApplySortMovies(allRequests, sortProperty, sortOrder)
+            var requests = await _queryBuilder.Sort(allRequests, sortProperty, sortOrder)
                 .Skip(position).Take(count).ToListAsync();
 
             await FillAdditionalFields(shouldHide, requests);
@@ -369,39 +317,6 @@ namespace Ombi.Core.Engine
             {
                 Result = true
             };
-        }
-
-        private static IQueryable<MovieRequests> ApplySortMovies(IQueryable<MovieRequests> query, string sortProperty, string sortOrder)
-        {
-            var asc = sortOrder.Equals("asc", StringComparison.InvariantCultureIgnoreCase);
-            return sortProperty.ToLowerInvariant() switch
-            {
-                "id" => asc ? query.OrderBy(x => x.Id) : query.OrderByDescending(x => x.Id),
-                "title" => asc ? query.OrderBy(x => x.Title) : query.OrderByDescending(x => x.Title),
-                "releasedate" => asc ? query.OrderBy(x => x.ReleaseDate) : query.OrderByDescending(x => x.ReleaseDate),
-                _ => asc ? query.OrderBy(x => x.RequestedDate) : query.OrderByDescending(x => x.RequestedDate)
-            };
-        }
-
-        private IQueryable<MovieRequests> OrderMovies(IQueryable<MovieRequests> allRequests, OrderType type)
-        {
-            switch (type)
-            {
-                case OrderType.RequestedDateAsc:
-                    return allRequests.OrderBy(x => x.RequestedDate);
-                case OrderType.RequestedDateDesc:
-                    return allRequests.OrderByDescending(x => x.RequestedDate);
-                case OrderType.TitleAsc:
-                    return allRequests.OrderBy(x => x.Title);
-                case OrderType.TitleDesc:
-                    return allRequests.OrderByDescending(x => x.Title);
-                case OrderType.StatusAsc:
-                    return allRequests.OrderBy(x => x.Status);
-                case OrderType.StatusDesc:
-                    return allRequests.OrderByDescending(x => x.Status);
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(type), type, null);
-            }
         }
 
         public async Task<int> GetTotal()

@@ -7,6 +7,7 @@ using Moq;
 using NUnit.Framework;
 using Ombi.Api.External.ExternalApis.TheMovieDb;
 using Ombi.Core.Engine;
+using Ombi.Core.Engine.Requests;
 using Ombi.Core.Helpers;
 using Ombi.Core.Models.Requests;
 using Ombi.Core.Rule.Interfaces;
@@ -47,8 +48,9 @@ namespace Ombi.Core.Tests.Engine.V2
             var mediaCache = new Mock<IMediaCacheService>();
             var featureService = new Mock<IFeatureService>();
             var userPlayedMovieRepository = new Mock<IUserPlayedMovieRepository>();
+            var queryBuilder = new MovieRequestQueryBuilder();
             _engine = new MovieRequestEngine(movieApi.Object, requestService.Object, user.Object, notificationHelper.Object, rules.Object, movieSender.Object,
-                logger.Object, userManager.Object, requestLogRepo.Object, cache.Object, ombiSettings.Object, requestSubs.Object, mediaCache.Object, featureService.Object, userPlayedMovieRepository.Object);
+                logger.Object, userManager.Object, requestLogRepo.Object, cache.Object, ombiSettings.Object, requestSubs.Object, mediaCache.Object, featureService.Object, userPlayedMovieRepository.Object, queryBuilder);
         }
 
         [Test]
