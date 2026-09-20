@@ -17,6 +17,7 @@ using Ombi.Api.External.ExternalApis.TvMaze;
 using Ombi.Core;
 using Ombi.Core.Engine;
 using Ombi.Core.Engine.Interfaces;
+using Ombi.Core.Engine.Requests;
 using Ombi.Core.Models.Requests;
 using Ombi.Core.Notifications;
 using Ombi.Core.Rule;
@@ -99,6 +100,11 @@ namespace Ombi.DependencyInjection
         public static void RegisterEngines(this IServiceCollection services)
         {
             services.AddTransient<IMovieEngine, MovieSearchEngine>();
+            services.AddTransient<IMovieRequestQueryBuilder, MovieRequestQueryBuilder>();
+            services.AddTransient<IMovieRequestEnricher, MovieRequestEnricher>();
+            services.AddTransient<IMovieRequestDispatcher, MovieRequestDispatcher>();
+            services.AddTransient<IMovieRequestStatusService, MovieRequestStatusService>();
+            services.AddTransient<IMovieRequestFactory, MovieRequestFactory>();
             services.AddTransient<IMovieRequestEngine, MovieRequestEngine>();
             services.AddTransient<ITvRequestEngine, TvRequestEngine>();
             services.AddTransient<ITvSearchEngine, TvSearchEngine>();
