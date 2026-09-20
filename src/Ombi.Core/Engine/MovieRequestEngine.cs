@@ -31,34 +31,35 @@ namespace Ombi.Core.Engine
     public class MovieRequestEngine : BaseMediaEngine, IMovieRequestEngine
     {
         public MovieRequestEngine(IMovieDbApi movieApi, IRequestServiceMain requestService, ICurrentUser user,
-            INotificationHelper helper, IRuleEvaluator r, IMovieSender sender, ILogger<MovieRequestEngine> log,
+            INotificationHelper helper, IRuleEvaluator r, ILogger<MovieRequestEngine> log,
             OmbiUserManager manager, IRepository<RequestLog> rl, ICacheService cache,
             ISettingsService<OmbiSettings> ombiSettings, IRepository<RequestSubscription> sub, IMediaCacheService mediaCacheService,
             IFeatureService featureService,
             IMovieRequestQueryBuilder queryBuilder,
-            IMovieRequestEnricher enricher)
+            IMovieRequestEnricher enricher,
+            IMovieRequestDispatcher dispatcher)
             : base(user, requestService, r, manager, cache, ombiSettings, sub)
         {
             MovieApi = movieApi;
             NotificationHelper = helper;
-            Sender = sender;
             Logger = log;
             _requestLog = rl;
             _mediaCacheService = mediaCacheService;
             _featureService = featureService;
             _queryBuilder = queryBuilder;
             _enricher = enricher;
+            _dispatcher = dispatcher;
         }
 
         private IMovieDbApi MovieApi { get; }
         private INotificationHelper NotificationHelper { get; }
-        private IMovieSender Sender { get; }
         private ILogger<MovieRequestEngine> Logger { get; }
         private readonly IRepository<RequestLog> _requestLog;
         private readonly IMediaCacheService _mediaCacheService;
         private readonly IFeatureService _featureService;
         private readonly IMovieRequestQueryBuilder _queryBuilder;
         private readonly IMovieRequestEnricher _enricher;
+        private readonly IMovieRequestDispatcher _dispatcher;
 
         /// <summary>
         /// Requests the movie.
@@ -442,7 +443,7 @@ namespace Ombi.Core.Engine
             }
             await _mediaCacheService.Purge();
 
-            return await ProcessSendingMovie(request, is4K);
+            return await _dispatcher.Send(request, is4K);
         }
 
         public async Task<RequestEngineResult> RequestCollection(int collectionId, CancellationToken cancellationToken)
@@ -468,39 +469,6 @@ namespace Ombi.Core.Engine
             }
 
             return new RequestEngineResult { Result = true, Message = $"The collection {collections.name} has been successfully added!", RequestId = results.FirstOrDefault().RequestId };
-        }
-
-        private async Task<RequestEngineResult> ProcessSendingMovie(MovieRequests request, bool is4K)
-        {
-            if (is4K ? request.Approved4K : request.Approved)
-            {
-                var result = await Sender.Send(request, is4K);
-                if (result.Success && result.Sent)
-                {
-                    return new RequestEngineResult
-                    {
-                        Result = true
-                    };
-                }
-
-                if (!result.Success)
-                {
-                    Logger.LogWarning("Tried auto sending movie but failed. Message: {0}", result.Message);
-                    return new RequestEngineResult
-                    {
-                        Message = result.Message,
-                        ErrorMessage = result.Message,
-                        Result = false
-                    };
-                }
-
-                // If there are no providers then it's successful but movie has not been sent
-            }
-
-            return new RequestEngineResult
-            {
-                Result = true
-            };
         }
 
         /// <summary>
@@ -590,7 +558,7 @@ namespace Ombi.Core.Engine
                 };
             }
 
-            return await ProcessSendingMovie(request, is4K);
+            return await _dispatcher.Send(request, is4K);
         }
 
         public async Task<RequestEngineResult> MarkUnavailable(int modelId, bool is4K)
