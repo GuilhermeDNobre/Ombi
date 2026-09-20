@@ -57,6 +57,7 @@ namespace Ombi.Core.Tests.Engine
             _mocker.Use<IMovieRequestEnricher>(_mocker.CreateInstance<MovieRequestEnricher>());
             _mocker.Use<IMovieRequestDispatcher>(_mocker.CreateInstance<MovieRequestDispatcher>());
             _mocker.Use<IMovieRequestStatusService>(_mocker.CreateInstance<MovieRequestStatusService>());
+            _mocker.Use<IMovieRequestFactory>(_mocker.CreateInstance<MovieRequestFactory>());
 
             _subject = _mocker.CreateInstance<MovieRequestEngine>();
             var list = DbHelper.GetQueryableMockDbSet(new RequestSubscription());

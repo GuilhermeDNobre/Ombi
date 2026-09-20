@@ -52,8 +52,9 @@ namespace Ombi.Core.Tests.Engine.V2
             var enricher = new MovieRequestEnricher(requestSubs.Object, userPlayedMovieRepository.Object);
             var dispatcher = new MovieRequestDispatcher(movieSender.Object, logger.Object);
             var statusService = new MovieRequestStatusService(requestService.Object, notificationHelper.Object, rules.Object, mediaCache.Object, dispatcher);
+            var factory = new MovieRequestFactory(movieApi.Object, requestService.Object, user.Object, notificationHelper.Object, rules.Object, userManager.Object, requestLogRepo.Object, mediaCache.Object, featureService.Object);
             _engine = new MovieRequestEngine(movieApi.Object, requestService.Object, user.Object, notificationHelper.Object, rules.Object,
-                logger.Object, userManager.Object, requestLogRepo.Object, cache.Object, ombiSettings.Object, requestSubs.Object, mediaCache.Object, featureService.Object, queryBuilder, enricher, dispatcher, statusService);
+                logger.Object, userManager.Object, cache.Object, ombiSettings.Object, requestSubs.Object, mediaCache.Object, queryBuilder, enricher, dispatcher, statusService, factory);
         }
 
         [Test]

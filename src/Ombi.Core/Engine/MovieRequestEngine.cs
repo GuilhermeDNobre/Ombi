@@ -32,37 +32,35 @@ namespace Ombi.Core.Engine
     {
         public MovieRequestEngine(IMovieDbApi movieApi, IRequestServiceMain requestService, ICurrentUser user,
             INotificationHelper helper, IRuleEvaluator r, ILogger<MovieRequestEngine> log,
-            OmbiUserManager manager, IRepository<RequestLog> rl, ICacheService cache,
+            OmbiUserManager manager, ICacheService cache,
             ISettingsService<OmbiSettings> ombiSettings, IRepository<RequestSubscription> sub, IMediaCacheService mediaCacheService,
-            IFeatureService featureService,
             IMovieRequestQueryBuilder queryBuilder,
             IMovieRequestEnricher enricher,
             IMovieRequestDispatcher dispatcher,
-            IMovieRequestStatusService statusService)
+            IMovieRequestStatusService statusService,
+            IMovieRequestFactory factory)
             : base(user, requestService, r, manager, cache, ombiSettings, sub)
         {
             MovieApi = movieApi;
             NotificationHelper = helper;
             Logger = log;
-            _requestLog = rl;
             _mediaCacheService = mediaCacheService;
-            _featureService = featureService;
             _queryBuilder = queryBuilder;
             _enricher = enricher;
             _dispatcher = dispatcher;
             _statusService = statusService;
+            _factory = factory;
         }
 
         private IMovieDbApi MovieApi { get; }
         private INotificationHelper NotificationHelper { get; }
         private ILogger<MovieRequestEngine> Logger { get; }
-        private readonly IRepository<RequestLog> _requestLog;
         private readonly IMediaCacheService _mediaCacheService;
-        private readonly IFeatureService _featureService;
         private readonly IMovieRequestQueryBuilder _queryBuilder;
         private readonly IMovieRequestEnricher _enricher;
         private readonly IMovieRequestDispatcher _dispatcher;
         private readonly IMovieRequestStatusService _statusService;
+        private readonly IMovieRequestFactory _factory;
 
         /// <summary>
         /// Requests the movie.
@@ -71,100 +69,14 @@ namespace Ombi.Core.Engine
         /// <returns></returns>
         public async Task<RequestEngineResult> RequestMovie(MovieRequestViewModel model)
         {
-            var movieInfo = await MovieApi.GetMovieInformationWithExtraInfo(model.TheMovieDbId, model.LanguageCode);
-            if (movieInfo == null || movieInfo.Id == 0)
+            var buildResult = await _factory.Build(model);
+            if (buildResult.Error != null)
             {
-                return new RequestEngineResult
-                {
-                    Result = false,
-                    Message = "There was an issue adding this movie!",
-                    ErrorMessage = $"Please try again later"
-                };
+                return buildResult.Error;
             }
 
-            var fullMovieName =
-                $"{movieInfo.Title}{(!string.IsNullOrEmpty(movieInfo.ReleaseDate) ? $" ({DateTime.Parse(movieInfo.ReleaseDate).Year})" : string.Empty)}";
+            var requestModel = buildResult.Request;
 
-            var userDetails = await GetUser();
-            var canRequestOnBehalf = model.RequestOnBehalf.HasValue();
-
-            var isAdmin = Username.Equals("API", StringComparison.CurrentCultureIgnoreCase)
-                || await UserManager.IsInRoleAsync(userDetails, OmbiRoles.PowerUser)
-                || await UserManager.IsInRoleAsync(userDetails, OmbiRoles.Admin);
-            if (canRequestOnBehalf && !isAdmin)
-            {
-                return new RequestEngineResult
-                {
-                    Result = false,
-                    Message = "You do not have the correct permissions to request on behalf of users!",
-                    ErrorMessage = $"You do not have the correct permissions to request on behalf of users!"
-                };
-            }
-
-            if ((model.RootFolderOverride.HasValue || model.QualityPathOverride.HasValue) && !isAdmin)
-            {
-                return new RequestEngineResult
-                {
-                    Result = false,
-                    Message = "You do not have the correct permissions!",
-                    ErrorMessage = $"You do not have the correct permissions!"
-                };
-            }
-
-            var is4kFeatureEnabled = await _featureService.FeatureEnabled(FeatureNames.Movie4KRequests);
-            var is4kRequest = is4kFeatureEnabled && model.Is4kRequest;
-
-            MovieRequests requestModel;
-            bool isExisting = false;
-            // Do we already have a request? 4k or non 4k
-            var existingRequest = await MovieRepository.GetRequestAsync(movieInfo.Id);
-            if (existingRequest != null && is4kFeatureEnabled)
-            {
-                if (model.Is4kRequest)
-                {
-                    existingRequest.Is4kRequest = true;
-                    existingRequest.RequestedDate4k = DateTime.UtcNow;
-                }
-                else
-                {
-                    existingRequest.RequestedDate = DateTime.UtcNow;
-                }
-                isExisting = true;
-                requestModel = existingRequest;
-            }
-            else
-            {
-                requestModel = new MovieRequests
-                {
-                    TheMovieDbId = movieInfo.Id,
-                    RequestType = RequestType.Movie,
-                    Overview = movieInfo.Overview,
-                    ImdbId = movieInfo.ImdbId,
-                    PosterPath = PosterPathHelper.FixPosterPath(movieInfo.PosterPath),
-                    Title = movieInfo.Title,
-                    ReleaseDate = !string.IsNullOrEmpty(movieInfo.ReleaseDate)
-                        ? DateTime.Parse(movieInfo.ReleaseDate)
-                        : DateTime.MinValue,
-                    Status = movieInfo.Status,
-                    RequestedDate = model.Is4kRequest ? DateTime.MinValue : DateTime.UtcNow,
-                    Approved = false,
-                    Approved4K = false,
-                    RequestedUserId = canRequestOnBehalf ? model.RequestOnBehalf : userDetails.Id,
-                    Background = movieInfo.BackdropPath,
-                    LangCode = model.LanguageCode,
-                    RequestedByAlias = model.RequestedByAlias,
-                    RootPathOverride = model.RootFolderOverride.GetValueOrDefault(),
-                    QualityOverride = model.QualityPathOverride.GetValueOrDefault(),
-                    RequestedDate4k = model.Is4kRequest ? DateTime.UtcNow : DateTime.MinValue,
-                    Is4kRequest = model.Is4kRequest,
-                    Source = model.Source
-                };
-            }
-
-            var usDates = movieInfo.ReleaseDates?.Results?.FirstOrDefault(x => x.IsoCode == "US");
-            requestModel.DigitalReleaseDate = usDates?.ReleaseDate
-                ?.FirstOrDefault(x => x.Type == ReleaseDateType.Digital)?.ReleaseDate;
-            
             var ruleResults = (await RunRequestRules(requestModel)).ToList();
             var ruleResultInError = ruleResults.Find(x => !x.Success);
             if (ruleResultInError != null)
@@ -178,7 +90,7 @@ namespace Ombi.Core.Engine
 
             if (requestModel.Approved || requestModel.Approved4K) // The rules have auto approved this
             {
-                var requestEngineResult = await AddMovieRequest(requestModel, fullMovieName, model.RequestOnBehalf, isExisting, is4kRequest);
+                var requestEngineResult = await _factory.Add(requestModel, buildResult.FullMovieName, model.RequestOnBehalf, buildResult.IsExisting, buildResult.Is4kRequest);
                 if (requestEngineResult.Result)
                 {
                     var result = await ApproveMovie(requestModel, model.Is4kRequest);
@@ -199,9 +111,8 @@ namespace Ombi.Core.Engine
                 // If there are no providers then it's successful but movie has not been sent
             }
 
-            return await AddMovieRequest(requestModel, fullMovieName, model.RequestOnBehalf, isExisting, is4kRequest);
+            return await _factory.Add(requestModel, buildResult.FullMovieName, model.RequestOnBehalf, buildResult.IsExisting, buildResult.Is4kRequest);
         }
-
 
         /// <summary>
         /// Gets the requests.
@@ -515,38 +426,5 @@ namespace Ombi.Core.Engine
             return await _statusService.MarkAvailable(modelId, is4K);
         }
 
-        private async Task<RequestEngineResult> AddMovieRequest(MovieRequests model, string movieName, string requestOnBehalf, bool isExisting, bool is4k)
-        {
-            if (is4k)
-            {
-                model.Has4KRequest = true;
-            }
-            if (!isExisting)
-            {
-                await MovieRepository.Add(model);
-            }
-            else
-            {
-                await MovieRepository.Update(model);
-            }
-
-            var result = await RunSpecificRule(model, SpecificRules.CanSendNotification, requestOnBehalf);
-            if (result.Success)
-            {
-                await NotificationHelper.NewRequest(model);
-            }
-
-            await _mediaCacheService.Purge();
-
-            await _requestLog.Add(new RequestLog
-            {
-                UserId = requestOnBehalf.HasValue() ? requestOnBehalf : (await GetUser()).Id,
-                RequestDate = DateTime.UtcNow,
-                RequestId = model.Id,
-                RequestType = RequestType.Movie,
-            });
-
-            return new RequestEngineResult { Result = true, Message = $"{movieName} has been successfully added!", RequestId = model.Id };
-        }
     }
 }
