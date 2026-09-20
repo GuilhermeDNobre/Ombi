@@ -42,6 +42,14 @@ namespace Ombi.Notifications
             }
         }
 
+        public async Task Handle(NotificationOptions model)
+        {
+            await OmbiQuartz.TriggerJob(nameof(INotificationService), "Notifications", new Dictionary<string, object>
+            {
+                {JobDataKeys.NotificationOptions, model}
+            });
+        }
+
         private async Task NotifyAsync(INotification notification, NotificationOptions model)
         {
             try
