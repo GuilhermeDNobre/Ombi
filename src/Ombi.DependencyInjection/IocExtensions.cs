@@ -283,6 +283,7 @@ namespace Ombi.DependencyInjection
             services.AddTransient<IEmbyPlayedSync, EmbyPlayedSync>();
             services.AddTransient<IEmbyEpisodeSync, EmbyEpisodeSync>();
             services.AddTransient<IEmbyAvaliabilityChecker, EmbyAvaliabilityChecker>();
+            services.AddTransient<IMediaServerCatalog<Ombi.Store.Entities.JellyfinContent>, JellyfinCatalogAdapter>();
             services.AddTransient<IJellyfinContentSync, JellyfinContentSync>();
             services.AddTransient<IJellyfinEpisodeSync, JellyfinEpisodeSync>();
             services.AddTransient<IJellyfinAvaliabilityChecker, JellyfinAvaliabilityChecker>();
