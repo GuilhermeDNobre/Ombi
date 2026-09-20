@@ -1,7 +1,7 @@
-﻿using Ombi.Api.External.ExternalApis.Sonarr.Models;
+using Ombi.Api.External.ExternalApis.Sonarr.Models;
 using System.Collections.Generic;
 
-namespace Ombi.Core.Senders
+namespace Ombi.Core.Senders.Dvr
 {
     internal class SonarrSendOptions
     {
