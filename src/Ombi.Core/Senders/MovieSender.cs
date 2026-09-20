@@ -1,272 +1,60 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Ombi.Api.External.ExternalApis.CouchPotato;
-using Ombi.Api.External.ExternalApis.DogNzb.Models;
-using Ombi.Api.External.ExternalApis.Radarr;
-using Ombi.Core.Settings;
+using Ombi.Core.Senders.Dvr;
 using Ombi.Helpers;
-using Ombi.Settings.Settings.Models.External;
-using Ombi.Store.Entities.Requests;
-using Ombi.Api.External.ExternalApis.DogNzb;
 using Ombi.Store.Entities;
+using Ombi.Store.Entities.Requests;
 using Ombi.Store.Repository;
-using System.Collections.Generic;
-using Ombi.Api.External.ExternalApis.Radarr.Models;
-using Microsoft.Extensions.Options;
-using Ombi.Api.External.ExternalApis.Sonarr;
 
 namespace Ombi.Core.Senders
 {
     public class MovieSender : IMovieSender
     {
-        public MovieSender(ISettingsService<RadarrSettings> radarrSettings, ISettingsService<Radarr4KSettings> radarr4kSettings, ILogger<MovieSender> log,
-            ISettingsService<DogNzbSettings> dogSettings, IDogNzbApi dogApi, ISettingsService<CouchPotatoSettings> cpSettings,
-            ICouchPotatoApi cpApi, IRepository<UserQualityProfiles> userProfiles, IRepository<RequestQueue> requestQueue, INotificationHelper notify,
-            IRadarrV3Api radarrV3Api)
+        public MovieSender(IMovieDvrSenderFactory factory, IRepository<RequestQueue> requestQueue, INotificationHelper notify, ILogger<MovieSender> log)
         {
-            _radarrSettings = radarrSettings;
-            _log = log;
-            _dogNzbSettings = dogSettings;
-            _dogNzbApi = dogApi;
-            _couchPotatoSettings = cpSettings;
-            _couchPotatoApi = cpApi;
-            _userProfiles = userProfiles;
+            _factory = factory;
             _requestQueuRepository = requestQueue;
             _notificationHelper = notify;
-            _radarrV3Api = radarrV3Api;
-            _radarr4KSettings = radarr4kSettings;
+            _log = log;
         }
 
-        private readonly ISettingsService<RadarrSettings> _radarrSettings;
-        private readonly ISettingsService<Radarr4KSettings> _radarr4KSettings;
-        private readonly ILogger<MovieSender> _log;
-        private readonly IDogNzbApi _dogNzbApi;
-        private readonly ISettingsService<DogNzbSettings> _dogNzbSettings;
-        private readonly ISettingsService<CouchPotatoSettings> _couchPotatoSettings;
-        private readonly ICouchPotatoApi _couchPotatoApi;
-        private readonly IRepository<UserQualityProfiles> _userProfiles;
+        private readonly IMovieDvrSenderFactory _factory;
         private readonly IRepository<RequestQueue> _requestQueuRepository;
         private readonly INotificationHelper _notificationHelper;
-        private readonly IRadarrV3Api _radarrV3Api;
+        private readonly ILogger<MovieSender> _log;
 
         public async Task<SenderResult> Send(MovieRequests model, bool is4K)
         {
-            SenderResult result = null;
-            try
+            var senders = await _factory.GetEnabledSendersAsync(is4K);
+            if (!senders.Any())
             {
-                var cpSettings = await _couchPotatoSettings.GetSettingsAsync();
-
-                RadarrSettings radarrSettings;
-                if (is4K)
-                {
-                    radarrSettings = await _radarr4KSettings.GetSettingsAsync();
-                }
-                else
-                {
-                    radarrSettings = await _radarrSettings.GetSettingsAsync();
-                }
-                if (radarrSettings.Enabled)
-                {
-                    result = await SendToRadarr(model, radarrSettings, is4K);
-                }
-                else
-                {
-                    var dogSettings = await _dogNzbSettings.GetSettingsAsync();
-                    if (dogSettings.Enabled)
-                    {
-                        await SendToDogNzb(model, dogSettings);
-                        result = new SenderResult
-                        {
-                            Success = true,
-                            Sent = true,
-                        };
-                    }
-                    else if (cpSettings.Enabled)
-                    {
-                        result = await SendToCp(model, cpSettings, cpSettings.DefaultProfileId);
-                    }
-                }
-
-                if (result != null && result.Success)
-                {
-                    return result;
-                }
-            }
-            catch (Exception e)
-            {
-                _log.LogError(e, "Error when sending movie to DVR app, added to the request queue");
-                await AddToRequestFailureQueue(model, e.Message);
-                return new SenderResult { Success = false, Sent = false, Message = e.Message };
-            }
-
-            if (result != null && !result.Success)
-            {
-                _log.LogWarning("Movie send to DVR app failed: {Message}, added to the request queue", result.Message);
-                await AddToRequestFailureQueue(model, result.Message);
-                return result;
-            }
-
-            return new SenderResult
-            {
-                Success = true,
-                Sent = false,
-            };
-        }
-
-        private async Task<SenderResult> SendToCp(FullBaseRequest model, CouchPotatoSettings cpSettings, string cpSettingsDefaultProfileId)
-        {
-            var result = await _couchPotatoApi.AddMovie(model.ImdbId, cpSettings.ApiKey, model.Title, cpSettings.FullUri, cpSettingsDefaultProfileId);
-            return new SenderResult { Success = result, Sent = true };
-        }
-
-        private async Task<DogNzbMovieAddResult> SendToDogNzb(FullBaseRequest model, DogNzbSettings settings)
-        {
-            var id = model.ImdbId;
-            return await _dogNzbApi.AddMovie(settings.ApiKey, id);
-        }
-
-        private async Task<SenderResult> SendToRadarr(MovieRequests model, RadarrSettings settings, bool is4k)
-        {
-            var qualityToUse = int.Parse(settings.DefaultQualityProfile);
-
-            var rootFolderPath = settings.DefaultRootPath;
-
-            var profiles = await _userProfiles.GetAll().FirstOrDefaultAsync(x => x.UserId == model.RequestedUserId);
-            if (profiles != null)
-            {
-                if (is4k)
-                {
-                    if (profiles.Radarr4KRootPath > 0)
-                    {
-                        var tempPath = await RadarrRootPath(profiles.Radarr4KRootPath, settings);
-                        if (tempPath.HasValue())
-                        {
-                            rootFolderPath = tempPath;
-                        }
-                    }
-                    if (profiles.Radarr4KQualityProfile > 0)
-                    {
-                        qualityToUse = profiles.Radarr4KQualityProfile;
-                    }
-                } 
-                else
-                {
-                    if (profiles.RadarrRootPath > 0)
-                    {
-                        var tempPath = await RadarrRootPath(profiles.RadarrRootPath, settings);
-                        if (tempPath.HasValue())
-                        {
-                            rootFolderPath = tempPath;
-                        }
-                    }
-                    if (profiles.RadarrQualityProfile > 0)
-                    {
-                        qualityToUse = profiles.RadarrQualityProfile;
-                    }
-                }
-            }
-
-            var tags = new List<int>();
-            if (settings.Tag.HasValue)
-            {
-                tags.Add(settings.Tag.Value);
-            }
-            if (settings.SendUserTags)
-            {
-                var userTag = await GetOrCreateTag(model, settings);
-                if (userTag != null)
-                {
-                    tags.Add(userTag.id);
-                }
-            }
-
-            // Overrides on the request take priority
-            if (model.QualityOverride > 0)
-            {
-                qualityToUse = model.QualityOverride;
-            }
-            if (model.RootPathOverride > 0)
-            {
-                rootFolderPath = await RadarrRootPath(model.RootPathOverride, settings);
-            }
-
-            List<MovieResponse> movies;
-            // Check if the movie already exists? Since it could be unmonitored
-
-            // Get the appropriate Radarr instance settings for existence check
-            var existenceCheckSettings = is4k ? await _radarr4KSettings.GetSettingsAsync() : settings;
-            movies = await _radarrV3Api.GetMovies(existenceCheckSettings.ApiKey, existenceCheckSettings.FullUri);
-
-            var existingMovie = movies.FirstOrDefault(x => x.tmdbId == model.TheMovieDbId);
-            if (existingMovie == null)
-            {
-                var result = await _radarrV3Api.AddMovie(model.TheMovieDbId, model.Title, model.ReleaseDate.Year,
-                    qualityToUse, rootFolderPath, settings.ApiKey, settings.FullUri, !settings.AddOnly,
-                    settings.MinimumAvailability, tags);
-
-                if (!string.IsNullOrEmpty(result.Error?.message))
-                {
-                    _log.LogError(LoggingEvents.RadarrCacher, result.Error.message);
-                    return new SenderResult { Success = false, Message = result.Error.message, Sent = false };
-                }
-                if (!string.IsNullOrEmpty(result.title))
-                {
-                    return new SenderResult { Success = true, Sent = false };
-                }
                 return new SenderResult { Success = true, Sent = false };
             }
-            // We have the movie, check if we can request it or change the status
-            if (!existingMovie.monitored)
-            {
-                // let's set it to monitored and search for it
-                existingMovie.monitored = true;
 
-                await _radarrV3Api.UpdateMovie(existingMovie, settings.ApiKey, settings.FullUri);
-                // Search for it
-                if (!settings.AddOnly)
+            SenderResult lastFailure = null;
+            foreach (var sender in senders)
+            {
+                try
                 {
-                    await _radarrV3Api.MovieSearch(new[] { existingMovie.id }, settings.ApiKey, settings.FullUri);
+                    var result = await sender.Send(model, is4K);
+                    if (result.Success)
+                    {
+                        return result;
+                    }
+                    lastFailure = result;
                 }
-
-                return new SenderResult { Success = true, Sent = true };
+                catch (Exception e)
+                {
+                    _log.LogError(e, "Error when sending movie to DVR app");
+                    lastFailure = new SenderResult { Success = false, Sent = false, Message = e.Message };
+                }
             }
 
-            return new SenderResult { Success = false, Sent = false, Message = "Movie is already monitored" };
-        }
-
-        private async Task<string> RadarrRootPath(int overrideId, RadarrSettings settings)
-        {
-            var paths = await _radarrV3Api.GetRootFolders(settings.ApiKey, settings.FullUri);
-            var selectedPath = paths.FirstOrDefault(x => x.id == overrideId);
-            return selectedPath?.path ?? string.Empty;
-        }
-
-        private async Task<Tag> GetOrCreateTag(MovieRequests model, RadarrSettings s)
-        {
-            if (model.RequestedUser == null)
-            {
-                _log.LogWarning("Cannot create tag - RequestedUser is null for movie request {MovieTitle}", model.Title);
-                return null;
-            }
-
-            // Sanitize username to comply with Radarr tag requirements (a-z, 0-9, and - only)
-            var tagName = StringHelper.SanitizeTagLabel(model.RequestedUser.UserName);
-
-            if (string.IsNullOrEmpty(tagName))
-            {
-                _log.LogWarning("Cannot create tag - sanitized username is empty for user {Username}", model.RequestedUser.UserName);
-                return null;
-            }
-
-            // Does tag exist?
-            var allTags = await _radarrV3Api.GetTags(s.ApiKey, s.FullUri);
-            var existingTag = allTags.FirstOrDefault(x => x.label.Equals(tagName, StringComparison.InvariantCultureIgnoreCase));
-            existingTag ??= await _radarrV3Api.CreateTag(s.ApiKey, s.FullUri, tagName);
-
-            return existingTag;
+            _log.LogWarning("Movie send to DVR app failed: {Message}, added to the request queue", lastFailure.Message);
+            await AddToRequestFailureQueue(model, lastFailure.Message);
+            return lastFailure;
         }
 
         private async Task AddToRequestFailureQueue(MovieRequests model, string errorMessage)
