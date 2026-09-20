@@ -102,6 +102,7 @@ namespace Ombi.DependencyInjection
             services.AddTransient<IMovieRequestQueryBuilder, MovieRequestQueryBuilder>();
             services.AddTransient<IMovieRequestEnricher, MovieRequestEnricher>();
             services.AddTransient<IMovieRequestDispatcher, MovieRequestDispatcher>();
+            services.AddTransient<IMovieRequestStatusService, MovieRequestStatusService>();
             services.AddTransient<IMovieRequestEngine, MovieRequestEngine>();
             services.AddTransient<ITvRequestEngine, TvRequestEngine>();
             services.AddTransient<ITvSearchEngine, TvSearchEngine>();

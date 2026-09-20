@@ -37,7 +37,8 @@ namespace Ombi.Core.Engine
             IFeatureService featureService,
             IMovieRequestQueryBuilder queryBuilder,
             IMovieRequestEnricher enricher,
-            IMovieRequestDispatcher dispatcher)
+            IMovieRequestDispatcher dispatcher,
+            IMovieRequestStatusService statusService)
             : base(user, requestService, r, manager, cache, ombiSettings, sub)
         {
             MovieApi = movieApi;
@@ -49,6 +50,7 @@ namespace Ombi.Core.Engine
             _queryBuilder = queryBuilder;
             _enricher = enricher;
             _dispatcher = dispatcher;
+            _statusService = statusService;
         }
 
         private IMovieDbApi MovieApi { get; }
@@ -60,6 +62,7 @@ namespace Ombi.Core.Engine
         private readonly IMovieRequestQueryBuilder _queryBuilder;
         private readonly IMovieRequestEnricher _enricher;
         private readonly IMovieRequestDispatcher _dispatcher;
+        private readonly IMovieRequestStatusService _statusService;
 
         /// <summary>
         /// Requests the movie.
@@ -374,76 +377,17 @@ namespace Ombi.Core.Engine
 
         public async Task<RequestEngineResult> ApproveMovieById(int requestId, bool is4K)
         {
-            var request = await MovieRepository.GetWithUser().FirstOrDefaultAsync(x => x.Id == requestId);
-            return await ApproveMovie(request, is4K);
+            return await _statusService.ApproveById(requestId, is4K);
         }
 
         public async Task<RequestEngineResult> DenyMovieById(int modelId, string denyReason, bool is4K)
         {
-            var request = await MovieRepository.GetWithUser().FirstOrDefaultAsync(x => x.Id == modelId);
-            if (request == null)
-            {
-                return new RequestEngineResult
-                {
-                    ErrorMessage = "Request does not exist"
-                };
-            }
-
-            if (is4K)
-            {
-                request.Denied4K = true;
-                request.DeniedReason4K = denyReason;
-            }
-            else
-            {
-                request.Denied = true;
-                request.DeniedReason = denyReason;
-            }
-            await MovieRepository.Update(request);
-            await _mediaCacheService.Purge();
-
-            // We are denying a request
-            await NotificationHelper.Notify(request, NotificationType.RequestDeclined);
-
-            return new RequestEngineResult
-            {
-                Result = true,
-                Message = "Request successfully deleted",
-            };
+            return await _statusService.DenyById(modelId, denyReason, is4K);
         }
 
         public async Task<RequestEngineResult> ApproveMovie(MovieRequests request, bool is4K)
         {
-            if (request == null)
-            {
-                return new RequestEngineResult
-                {
-                    ErrorMessage = "Request does not exist"
-                };
-            }
-
-            if (is4K)
-            {
-                request.MarkedAsApproved4K = DateTime.Now;
-                request.Approved4K = true;
-                request.Denied4K = false;
-            }
-            else
-            {
-                request.MarkedAsApproved = DateTime.Now;
-                request.Approved = true;
-                request.Denied = false;
-            }
-            await MovieRepository.Update(request);
-
-            var canNotify = await RunSpecificRule(request, SpecificRules.CanSendNotification, string.Empty);
-            if (canNotify.Success)
-            {
-                await NotificationHelper.Notify(request, NotificationType.RequestApproved);
-            }
-            await _mediaCacheService.Purge();
-
-            return await _dispatcher.Send(request, is4K);
+            return await _statusService.Approve(request, is4K);
         }
 
         public async Task<RequestEngineResult> RequestCollection(int collectionId, CancellationToken cancellationToken)
@@ -563,62 +507,12 @@ namespace Ombi.Core.Engine
 
         public async Task<RequestEngineResult> MarkUnavailable(int modelId, bool is4K)
         {
-            var request = await MovieRepository.GetWithUser().FirstOrDefaultAsync(x => x.Id == modelId);
-            if (request == null)
-            {
-                return new RequestEngineResult
-                {
-                    ErrorMessage = "Request does not exist"
-                };
-            }
-
-            if (is4K)
-            {
-                request.Available4K = false;
-            }
-            else
-            {
-                request.Available = false;
-            }
-            await MovieRepository.Update(request);
-            await _mediaCacheService.Purge();
-
-            return new RequestEngineResult
-            {
-                Message = "Request is now unavailable",
-                Result = true
-            };
+            return await _statusService.MarkUnavailable(modelId, is4K);
         }
 
         public async Task<RequestEngineResult> MarkAvailable(int modelId, bool is4K)
         {
-            var request = await MovieRepository.GetWithUser().FirstOrDefaultAsync(x => x.Id == modelId);
-            if (request == null)
-            {
-                return new RequestEngineResult
-                {
-                    ErrorMessage = "Request does not exist"
-                };
-            }
-            if (!is4K)
-            {
-                request.Available = true;
-                request.MarkedAsAvailable = DateTime.Now;
-            }
-            else
-            {
-                request.Available4K = true;
-                request.MarkedAsAvailable4K = DateTime.Now;
-            }
-            await NotificationHelper.Notify(request, NotificationType.RequestAvailable);
-            await MovieRepository.Update(request);
-            await _mediaCacheService.Purge();
-
-            return new RequestEngineResult
-            {
-                Message = "Request is now available",
-                Result = true
-            };
+            return await _statusService.MarkAvailable(modelId, is4K);
         }
 
         private async Task<RequestEngineResult> AddMovieRequest(MovieRequests model, string movieName, string requestOnBehalf, bool isExisting, bool is4k)
