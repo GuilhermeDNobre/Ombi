@@ -232,6 +232,7 @@ namespace Ombi.DependencyInjection
         {
             services.AddTransient<IRequestServiceMain, RequestService>();
             services.AddTransient<INotificationService, NotificationService>();
+            services.AddTransient<IRequestEventObserver, NotificationService>();
             services.AddTransient<IEmailProvider, GenericEmailProvider>();
             services.AddTransient<INotificationHelper, NotificationHelper>();
             services.AddSingleton<ICacheService, CacheService>();

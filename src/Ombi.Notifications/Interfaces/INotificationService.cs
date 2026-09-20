@@ -5,7 +5,7 @@ using Quartz;
 
 namespace Ombi.Core.Notifications
 {
-    public interface INotificationService : IJob
+    public interface INotificationService : IJob, IRequestEventObserver
     {
 
     }

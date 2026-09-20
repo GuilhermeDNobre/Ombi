@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Ombi.Core.Notifications;
 using Ombi.Helpers;
+using Ombi.Notifications;
 using Ombi.Notifications.Models;
 using Ombi.Store.Entities.Requests;
 
@@ -10,6 +10,13 @@ namespace Ombi.Core
 {
     public class NotificationHelper : INotificationHelper
     {
+        public NotificationHelper(IEnumerable<IRequestEventObserver> observers)
+        {
+            _observers = observers;
+        }
+
+        private readonly IEnumerable<IRequestEventObserver> _observers;
+
         public async Task NewRequest(FullBaseRequest model)
         {
             var notificationModel = new NotificationOptions
@@ -19,10 +26,7 @@ namespace Ombi.Core
                 NotificationType = NotificationType.NewRequest,
                 RequestType = model.RequestType
             };
-            await OmbiQuartz.TriggerJob(nameof(INotificationService), "Notifications", new Dictionary<string, object>
-            {
-                {JobDataKeys.NotificationOptions, notificationModel}
-            });
+            await PublishAsync(notificationModel);
         }
 
         public async Task NewRequest(ChildRequests model)
@@ -33,11 +37,8 @@ namespace Ombi.Core
                 DateTime = DateTime.Now,
                 NotificationType = NotificationType.NewRequest,
                 RequestType = model.RequestType
-            }; 
-            await OmbiQuartz.TriggerJob(nameof(INotificationService), "Notifications", new Dictionary<string, object>
-            {
-                {JobDataKeys.NotificationOptions, notificationModel}
-            });
+            };
+            await PublishAsync(notificationModel);
         }
 
         public async Task NewRequest(AlbumRequest model)
@@ -48,11 +49,8 @@ namespace Ombi.Core
                 DateTime = DateTime.Now,
                 NotificationType = NotificationType.NewRequest,
                 RequestType = model.RequestType
-            }; 
-            await OmbiQuartz.TriggerJob(nameof(INotificationService), "Notifications", new Dictionary<string, object>
-            {
-                {JobDataKeys.NotificationOptions, notificationModel}
-            });
+            };
+            await PublishAsync(notificationModel);
         }
 
 
@@ -67,10 +65,7 @@ namespace Ombi.Core
                 Recipient = model.RequestedUser?.Email ?? string.Empty
             };
 
-            await OmbiQuartz.TriggerJob(nameof(INotificationService), "Notifications", new Dictionary<string, object>
-            {
-                {JobDataKeys.NotificationOptions, notificationModel}
-            });
+            await PublishAsync(notificationModel);
         }
         public async Task Notify(ChildRequests model, NotificationType type)
         {
@@ -82,10 +77,7 @@ namespace Ombi.Core
                 RequestType = model.RequestType,
                 Recipient = model.RequestedUser?.Email ?? string.Empty
             };
-            await OmbiQuartz.TriggerJob(nameof(INotificationService), "Notifications", new Dictionary<string, object>
-            {
-                {JobDataKeys.NotificationOptions, notificationModel}
-            });
+            await PublishAsync(notificationModel);
         }
 
         public async Task Notify(AlbumRequest model, NotificationType type)
@@ -99,18 +91,20 @@ namespace Ombi.Core
                 Recipient = model.RequestedUser?.Email ?? string.Empty
             };
 
-            await OmbiQuartz.TriggerJob(nameof(INotificationService), "Notifications", new Dictionary<string, object>
-            {
-                {JobDataKeys.NotificationOptions, notificationModel}
-            });
+            await PublishAsync(notificationModel);
         }
 
         public async Task Notify(NotificationOptions model)
         {
-            await OmbiQuartz.TriggerJob(nameof(INotificationService), "Notifications", new Dictionary<string, object>
+            await PublishAsync(model);
+        }
+
+        private async Task PublishAsync(NotificationOptions model)
+        {
+            foreach (var observer in _observers)
             {
-                {JobDataKeys.NotificationOptions, model}
-            });
+                await observer.Handle(model);
+            }
         }
     }
 }
