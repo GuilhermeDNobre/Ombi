@@ -16,6 +16,7 @@ using Ombi.Core.Settings.Models.External;
 using Ombi.Helpers;
 using Ombi.Hubs;
 using Ombi.Schedule.Jobs.Emby;
+using Ombi.Schedule.Jobs.MediaServer;
 using Ombi.Store.Entities;
 using Ombi.Store.Repository;
 using Quartz;
@@ -97,6 +98,8 @@ namespace Ombi.Schedule.Tests
             scheduler.Setup(x => x.GetCurrentlyExecutingJobs(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<IJobExecutionContext>());
             _ = new QuartzMock(scheduler);
+
+            _mocker.Use<IMediaServerCatalog<EmbyContent>>(_mocker.CreateInstance<EmbyCatalogAdapter>());
 
             _subject = _mocker.CreateInstance<EmbyContentSync>();
         }
