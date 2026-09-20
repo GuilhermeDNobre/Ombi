@@ -206,19 +206,7 @@ namespace Ombi.Core.Engine
             OrderFilterModel orderFilter)
         {
             var shouldHide = await HideFromOtherUsers();
-            IQueryable<MovieRequests> allRequests;
-            if (shouldHide.Hide)
-            {
-                allRequests =
-                    MovieRepository.GetWithUser(shouldHide
-                        .UserId); //.Skip(position).Take(count).OrderByDescending(x => x.ReleaseDate).ToListAsync();
-            }
-            else
-            {
-                allRequests =
-                    MovieRepository
-                        .GetWithUser(); //.Skip(position).Take(count).OrderByDescending(x => x.ReleaseDate).ToListAsync();
-            }
+            var allRequests = LoadRequests(shouldHide);
 
             switch (orderFilter.AvailabilityFilter)
             {
@@ -267,19 +255,7 @@ namespace Ombi.Core.Engine
         public async Task<RequestsViewModel<MovieRequests>> GetRequests(int count, int position, string sortProperty, string sortOrder, string requestedByUserId = null)
         {
             var shouldHide = await HideFromOtherUsers();
-            IQueryable<MovieRequests> allRequests;
-            if (shouldHide.Hide)
-            {
-                allRequests =
-                    MovieRepository.GetWithUser(shouldHide
-                        .UserId);
-            }
-            else
-            {
-                allRequests =
-                    MovieRepository
-                        .GetWithUser();
-            }
+            var allRequests = LoadRequests(shouldHide);
 
             allRequests = FilterByRequestedUser(allRequests, requestedByUserId, shouldHide.IsAdmin);
 
@@ -298,19 +274,7 @@ namespace Ombi.Core.Engine
         public async Task<RequestsViewModel<MovieRequests>> GetRequestsByStatus(int count, int position, string sortProperty, string sortOrder, RequestStatus status, string requestedByUserId = null)
         {
             var shouldHide = await HideFromOtherUsers();
-            IQueryable<MovieRequests> allRequests;
-            if (shouldHide.Hide)
-            {
-                allRequests =
-                    MovieRepository.GetWithUser(shouldHide
-                        .UserId);
-            }
-            else
-            {
-                allRequests =
-                    MovieRepository
-                        .GetWithUser();
-            }
+            var allRequests = LoadRequests(shouldHide);
 
             allRequests = FilterByRequestedUser(allRequests, requestedByUserId, shouldHide.IsAdmin);
 
@@ -368,19 +332,7 @@ namespace Ombi.Core.Engine
         public async Task<RequestsViewModel<MovieRequests>> GetUnavailableRequests(int count, int position, string sortProperty, string sortOrder, string requestedByUserId = null)
         {
             var shouldHide = await HideFromOtherUsers();
-            IQueryable<MovieRequests> allRequests;
-            if (shouldHide.Hide)
-            {
-                allRequests =
-                    MovieRepository.GetWithUser(shouldHide
-                        .UserId).Where(x => !x.Available && x.Approved);
-            }
-            else
-            {
-                allRequests =
-                    MovieRepository
-                        .GetWithUser().Where(x => !x.Available && x.Approved);
-            }
+            var allRequests = LoadRequests(shouldHide).Where(x => !x.Available && x.Approved);
 
             allRequests = FilterByRequestedUser(allRequests, requestedByUserId, shouldHide.IsAdmin);
 
@@ -455,14 +407,7 @@ namespace Ombi.Core.Engine
         public async Task<int> GetTotal()
         {
             var shouldHide = await HideFromOtherUsers();
-            if (shouldHide.Hide)
-            {
-                return await MovieRepository.GetWithUser(shouldHide.UserId).CountAsync();
-            }
-            else
-            {
-                return await MovieRepository.GetWithUser().CountAsync();
-            }
+            return await LoadRequests(shouldHide).CountAsync();
         }
 
         /// <summary>
@@ -472,15 +417,7 @@ namespace Ombi.Core.Engine
         public async Task<IEnumerable<MovieRequests>> GetRequests()
         {
             var shouldHide = await HideFromOtherUsers();
-            List<MovieRequests> allRequests;
-            if (shouldHide.Hide)
-            {
-                allRequests = await MovieRepository.GetWithUser(shouldHide.UserId).ToListAsync();
-            }
-            else
-            {
-                allRequests = await MovieRepository.GetWithUser().ToListAsync();
-            }
+            var allRequests = await LoadRequests(shouldHide).ToListAsync();
 
             await FillAdditionalFields(shouldHide, allRequests);
 
@@ -496,6 +433,13 @@ namespace Ombi.Core.Engine
 
             return request;
         }
+        private IQueryable<MovieRequests> LoadRequests(HideResult shouldHide)
+        {
+            return shouldHide.Hide
+                ? MovieRepository.GetWithUser(shouldHide.UserId)
+                : MovieRepository.GetWithUser();
+        }
+
         private async Task FillAdditionalFields(HideResult shouldHide, List<MovieRequests> requests)
         {
             await CheckForSubscription(shouldHide.UserId, requests);
@@ -552,15 +496,7 @@ namespace Ombi.Core.Engine
         public async Task<IEnumerable<MovieRequests>> SearchMovieRequest(string search)
         {
             var shouldHide = await HideFromOtherUsers();
-            List<MovieRequests> allRequests;
-            if (shouldHide.Hide)
-            {
-                allRequests = await MovieRepository.GetWithUser(shouldHide.UserId).ToListAsync();
-            }
-            else
-            {
-                allRequests = await MovieRepository.GetWithUser().ToListAsync();
-            }
+            var allRequests = await LoadRequests(shouldHide).ToListAsync();
 
             var results = allRequests.Where(x => x.Title.Contains(search, CompareOptions.IgnoreCase)).ToList();
             await FillAdditionalFields(shouldHide, results);
