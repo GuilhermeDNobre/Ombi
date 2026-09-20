@@ -52,6 +52,7 @@ using Ombi.Helpers;
 using Ombi.Schedule.Jobs.Couchpotato;
 using Ombi.Schedule.Jobs.Emby;
 using Ombi.Schedule.Jobs.Jellyfin;
+using Ombi.Schedule.Jobs.MediaServer;
 using Ombi.Schedule.Jobs.Ombi;
 using Ombi.Schedule.Jobs.Plex;
 using Ombi.Schedule.Jobs.Sonarr;
@@ -277,6 +278,7 @@ namespace Ombi.DependencyInjection
 
             services.AddTransient<IPlexContentSync, PlexContentSync>();
             services.AddTransient<IPlexWatchlistImport, PlexWatchlistImport>();
+            services.AddTransient<IMediaServerCatalog<Ombi.Store.Entities.EmbyContent>, EmbyCatalogAdapter>();
             services.AddTransient<IEmbyContentSync, EmbyContentSync>();
             services.AddTransient<IEmbyPlayedSync, EmbyPlayedSync>();
             services.AddTransient<IEmbyEpisodeSync, EmbyEpisodeSync>();
